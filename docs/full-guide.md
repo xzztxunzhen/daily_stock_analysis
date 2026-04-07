@@ -122,6 +122,7 @@ daily_stock_analysis/
 |------------|------|:----:|
 | `STOCK_LIST` | 自选股代码，如 `600519,300750,002594` | ✅ |
 | `TAVILY_API_KEYS` | [Tavily](https://tavily.com/) 搜索 API（新闻搜索） | 推荐 |
+| `ANSPIRE_API_KEYS` | [Anspire AI Search](https://aisearch.anspire.cn/) 针对中文内容特别优化 (可有效增强A股分析效果) | 可选 |
 | `MINIMAX_API_KEYS` | [MiniMax](https://platform.minimaxi.com/) Coding Plan Web Search（结构化搜索结果） | 可选 |
 | `BOCHA_API_KEYS` | [博查搜索](https://open.bocha.cn/) Web Search API（中文搜索优化，支持AI摘要，多个key用逗号分隔） | 可选 |
 | `BRAVE_API_KEYS` | [Brave Search](https://brave.com/search/api/) API（隐私优先，美股优化，多个key用逗号分隔） | 可选 |
@@ -258,15 +259,20 @@ daily_stock_analysis/
 | 变量名 | 说明 | 必填 |
 |--------|------|:----:|
 | `TAVILY_API_KEYS` | Tavily 搜索 API Key（推荐） | 推荐 |
+| `ANSPIRE_API_KEYS` | Anspire 搜索 API Key（可有效增强A股分析效果） | 可选 | 
 | `MINIMAX_API_KEYS` | MiniMax Coding Plan Web Search（结构化搜索结果） | 可选 |
 | `BOCHA_API_KEYS` | 博查搜索 API Key（中文优化） | 可选 |
 | `BRAVE_API_KEYS` | Brave Search API Key（美股优化） | 可选 |
 | `SERPAPI_API_KEYS` | SerpAPI 备用搜索 | 可选 |
+| `SOCIAL_SENTIMENT_API_KEY` | Stock Sentiment API Key（Reddit / X / Polymarket，可选） | 可选 |
+| `SOCIAL_SENTIMENT_API_URL` | Stock Sentiment API 地址（默认 `https://api.adanos.org`） | 可选 |
 | `SEARXNG_BASE_URLS` | SearXNG 自建实例（无配额兜底，需在 settings.yml 启用 format: json）；留空时默认自动发现公共实例 | 可选 |
 | `SEARXNG_PUBLIC_INSTANCES_ENABLED` | 是否在 `SEARXNG_BASE_URLS` 为空时自动从 `searx.space` 获取公共实例（默认 `true`） | 可选 |
 | `NEWS_STRATEGY_PROFILE` | 新闻策略窗口档位：`ultra_short`(1天)/`short`(3天)/`medium`(7天)/`long`(30天)；实际窗口取与 `NEWS_MAX_AGE_DAYS` 的最小值 | 默认 `short` |
 | `NEWS_MAX_AGE_DAYS` | 新闻最大时效（天），搜索时限制结果在近期内 | 默认 `3` |
 | `BIAS_THRESHOLD` | 乖离率阈值（%），超过提示不追高；强势趋势股自动放宽到 1.5 倍 | 默认 `5.0` |
+
+> 行为说明：搜索服务与社交舆情服务为可选增强链路。任一服务初始化失败时，系统会记录 warning 并降级为跳过该服务，仅影响对应环节，不会阻塞技术面主链路和主任务流。
 
 ### 数据源配置
 
@@ -877,6 +883,19 @@ python main.py --debug
 - 常规日志：`logs/stock_analysis_YYYYMMDD.log`
 - 调试日志：`logs/stock_analysis_debug_YYYYMMDD.log`
 
+### SQLite 写入稳态配置
+
+默认文件型 SQLite 会在连接建立时启用 `WAL` 并设置 `busy_timeout`，`save_daily_data()` 也已改为按 `(code, date)` 批量原子 upsert，以降低批量更新和并发回写时的锁竞争。
+
+如需调整，可在 `.env` 中设置：
+
+| 变量 | 默认值 | 说明 |
+|------|-------|------|
+| `SQLITE_WAL_ENABLED` | `true` | 文件型 SQLite 是否启用 `journal_mode=WAL` |
+| `SQLITE_BUSY_TIMEOUT_MS` | `5000` | SQLite 等锁超时（毫秒） |
+| `SQLITE_WRITE_RETRY_MAX` | `3` | 遇到 `database is locked` / `database table is locked` 时的最大重试次数 |
+| `SQLITE_WRITE_RETRY_BASE_DELAY` | `0.1` | 写入重试基础退避时间（秒，按指数退避递增） |
+
 ---
 
 ## 回测功能
@@ -944,7 +963,7 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 
 - 📝 **配置管理** - 查看/修改自选股列表
 - 🚀 **快速分析** - 通过 API 接口触发分析
-- 📊 **实时进度** - 分析任务状态实时更新，支持多任务并行
+- 📊 **实时进度** - 分析任务状态实时更新，支持多任务并行；普通分析链路在进入 LLM 阶段后会优先尝试 LiteLLM 流式生成，并通过任务 SSE 回灌更细粒度的 `message/progress`
 - 📈 **回测验证** - 评估历史分析准确率，查询方向胜率与模拟收益
 - 🔗 **API 文档** - 访问 `/docs` 查看 Swagger UI
 
@@ -954,6 +973,7 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 |------|------|------|
 | `/api/v1/analysis/analyze` | POST | 触发股票分析 |
 | `/api/v1/analysis/tasks` | GET | 查询任务列表 |
+| `/api/v1/analysis/tasks/stream` | GET (SSE) | 订阅任务实时状态流 |
 | `/api/v1/analysis/status/{task_id}` | GET | 查询任务状态 |
 | `/api/v1/history` | GET | 查询分析历史 |
 | `/api/v1/backtest/run` | POST | 触发回测 |
@@ -966,6 +986,11 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 | `/docs` | GET | API Swagger 文档 |
 
 > 说明：`POST /api/v1/analysis/analyze` 在 `async_mode=false` 时仅支持单只股票；批量 `stock_codes` 需使用 `async_mode=true`。异步 `202` 响应对单股返回 `task_id`，对批量返回 `accepted` / `duplicates` 汇总结构。
+
+> 进度流说明：`GET /api/v1/analysis/tasks/stream` 除 `task_created / task_started / task_completed / task_failed` 外，新增 `task_progress` 事件。普通分析链路会在“行情准备 / 新闻检索 / 上下文整理 / LLM 生成 / 报告保存”等阶段持续更新 `progress` 与 `message`。LiteLLM 流式返回仅在服务端累积完整文本，最终 JSON 解析成功后才会持久化历史报告；若流式在首个 chunk 前不可用，会自动回退到原非流式调用；若已产生部分 chunk 后失败，系统先尝试同模型非流式重试，失败后再按既有主模型->备用模型顺序继续尝试。  
+> 如果任务进度回调异常，主链路不会中断，系统会提升告警为 warning 级别并在服务端日志中输出完整异常，便于排查 SSE 推送断点。
+>  
+> 说明：该特性属于运行时 SSE 与回退链路细节，优先记录于完整指南（`full-guide*.md`），不在 `README.md` 中展开详细行为分支。
 
 **调用示例**：
 ```bash

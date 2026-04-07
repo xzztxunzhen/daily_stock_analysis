@@ -117,6 +117,7 @@ Go to your forked repo → `Settings` → `Secrets and variables` → `Actions` 
 |------------|------|:----:|
 | `STOCK_LIST` | Watchlist codes, e.g., `600519,300750,002594` | ✅ |
 | `TAVILY_API_KEYS` | [Tavily](https://tavily.com/) Search API (for news search) | Recommended |
+| `ANSPIRE_API_KEYS` | [Anspire AI Search](https://aisearch.anspire.cn/) Specially optimized for Chinese content (effectively enhances A-share analysis) | Optional |
 | `MINIMAX_API_KEYS` | [MiniMax](https://platform.minimaxi.com/) Coding Plan Web Search (structured search results) | Optional |
 | `BOCHA_API_KEYS` | [Bocha Search](https://open.bocha.cn/) Web Search API (Chinese search optimized, supports AI summaries, multiple keys comma-separated) | Optional |
 | `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis) Backup search | Optional |
@@ -234,12 +235,17 @@ Default schedule: Every weekday at **18:00 (Beijing Time)** automatic execution.
 | Variable | Description | Required |
 |--------|------|:----:|
 | `TAVILY_API_KEYS` | Tavily Search API Key (recommended) | Recommended |
+| `ANSPIRE_API_KEYS` | Anspire Search API Key (effectively enhances A-share analysis) | Optional | 
 | `MINIMAX_API_KEYS` | MiniMax Coding Plan Web Search (structured results) | Optional |
 | `BOCHA_API_KEYS` | Bocha Search API Key (Chinese optimized) | Optional |
 | `BRAVE_API_KEYS` | Brave Search API Key (US stocks optimized) | Optional |
 | `SERPAPI_API_KEYS` | SerpAPI Backup search | Optional |
+| `SOCIAL_SENTIMENT_API_KEY` | Stock Sentiment API Key (Reddit / X / Polymarket, US stocks optional) | Optional |
+| `SOCIAL_SENTIMENT_API_URL` | Stock Sentiment API endpoint (default `https://api.adanos.org`) | Optional |
 | `SEARXNG_BASE_URLS` | SearXNG self-hosted instances (quota-free fallback, enable format: json in settings.yml); when empty the app auto-discovers public instances | Optional |
 | `SEARXNG_PUBLIC_INSTANCES_ENABLED` | Auto-discover public SearXNG instances from `searx.space` when `SEARXNG_BASE_URLS` is empty (default `true`) | Optional |
+
+> Behavior note: Search and social sentiment are optional enhancement services. If either service fails to initialize, the system logs a warning and degrades gracefully by skipping that stage without blocking the core analysis flow.
 
 ### Data Source Configuration
 
@@ -713,6 +719,19 @@ Log file locations:
 - Regular logs: `logs/stock_analysis_YYYYMMDD.log`
 - Debug logs: `logs/stock_analysis_debug_YYYYMMDD.log`
 
+### SQLite Write Stability
+
+For file-based SQLite databases, the app now enables `WAL` and sets `busy_timeout` on connection startup. `save_daily_data()` also uses a batch atomic upsert on `(code, date)` to reduce lock contention during bulk writes and concurrent callbacks.
+
+You can tune the behavior in `.env`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SQLITE_WAL_ENABLED` | `true` | Enable `journal_mode=WAL` for file-based SQLite |
+| `SQLITE_BUSY_TIMEOUT_MS` | `5000` | SQLite lock wait timeout in milliseconds |
+| `SQLITE_WRITE_RETRY_MAX` | `3` | Max retries for `database is locked` / `database table is locked` errors |
+| `SQLITE_WRITE_RETRY_BASE_DELAY` | `0.1` | Base backoff delay in seconds for exponential write retries |
+
 ---
 
 ## Backtesting
@@ -780,7 +799,7 @@ FastAPI provides RESTful API service for configuration management and triggering
 
 - **Configuration Management** - View/modify watchlist
 - **Quick Analysis** - Trigger analysis via API
-- **Real-time Progress** - Analysis task status updates in real-time, supports parallel tasks
+- **Real-time Progress** - Analysis task status updates in real-time, supports parallel tasks; the regular stock-analysis path now prefers LiteLLM streaming during the LLM stage and pushes finer-grained `message/progress` updates through task SSE
 - **Backtest Validation** - Evaluate historical analysis accuracy, query direction win rate and simulated returns
 - **API Documentation** - Visit `/docs` for Swagger UI
 
@@ -790,6 +809,7 @@ FastAPI provides RESTful API service for configuration management and triggering
 |------|------|------|
 | `/api/v1/analysis/analyze` | POST | Trigger stock analysis |
 | `/api/v1/analysis/tasks` | GET | Query task list |
+| `/api/v1/analysis/tasks/stream` | GET (SSE) | Subscribe to realtime task updates |
 | `/api/v1/analysis/status/{task_id}` | GET | Query task status |
 | `/api/v1/history` | GET | Query analysis history |
 | `/api/v1/backtest/run` | POST | Trigger backtest |
@@ -800,6 +820,11 @@ FastAPI provides RESTful API service for configuration management and triggering
 | `/docs` | GET | API Swagger documentation |
 
 > Note: `POST /api/v1/analysis/analyze` supports only one stock when `async_mode=false`; batch `stock_codes` requires `async_mode=true`. The async `202` response returns a single `task_id` for one stock, or an `accepted` / `duplicates` summary for batch requests.
+
+> Progress-stream note: `GET /api/v1/analysis/tasks/stream` now emits `task_progress` in addition to `task_created / task_started / task_completed / task_failed`. The regular analysis path updates `progress` and `message` across quote preparation, news retrieval, context assembly, LLM generation, and report persistence. Streaming chunks are accumulated only on the server side; history is persisted only after the final JSON parses successfully. If streaming is unavailable before the first chunk, the system falls back to the previous non-stream request. If a stream fails after partial output has already arrived, the system first retries non-stream for the same model, then continues through existing fallback models in the original order (primary + fallback list).
+> If a progress callback fails, the analysis flow continues, and the exception is now logged at warning level to help troubleshoot SSE delivery gaps.
+
+> Note: This behavior is documented in the full guide (`full-guide*.md`) because it is detailed runtime SSE/fallback behavior and is therefore kept out of the README.
 
 **Usage examples**:
 ```bash

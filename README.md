@@ -70,7 +70,7 @@
 |------|------|
 | AI 模型 | [AIHubMix](https://aihubmix.com/?aff=CfMq)、Gemini、OpenAI 兼容、DeepSeek、通义千问、Claude、Ollama 本地模型 等（统一通过 [LiteLLM](https://github.com/BerriAI/litellm) 调用，支持多 Key 负载均衡）|
 | 行情数据 | AkShare、Tushare、Pytdx、Baostock、YFinance、[Longbridge](https://open.longbridge.com/)（美股/港股首选数据源） |
-| 新闻搜索 | Tavily、SerpAPI、Bocha、Brave、MiniMax |
+| 新闻搜索 | Anspire、Tavily、SerpAPI、Bocha、Brave、MiniMax |
 | 社交舆情 | [Stock Sentiment API](https://api.adanos.org/docs)（Reddit / X / Polymarket，仅美股，可选） |
 
 > **长桥优先策略（仅美/港股）**：在配置 `LONGBRIDGE_APP_KEY` / `LONGBRIDGE_APP_SECRET` / `LONGBRIDGE_ACCESS_TOKEN` 的前提下，美股与港股的 **日线 K 线** 与 **实时行情** 由 **Longbridge 优先拉取**；若长桥失败或部分字段缺失，再由 **YFinance（美股）/ AkShare（港股）** 兜底或合并补全字段。**未配置长桥凭据时不会调用 Longbridge**，美股/港股仍以 YFinance / AkShare 为主数据源（与未集成长桥前的行为一致）。**美股大盘指数**（如 SPX）始终以 YFinance 优先（长桥不提供指数行情）。**A 股**路由不变，仍为 Efinance → AkShare → Tushare → Pytdx → Baostock。详见 `.env.example` 与 [完整指南](docs/full-guide.md) 中长桥说明。
@@ -179,6 +179,7 @@
 |------------|------|:----:|
 | `STOCK_LIST` | 自选股代码，如 `600519,hk00700,AAPL,TSLA` | ✅ |
 | `TAVILY_API_KEYS` | [Tavily](https://tavily.com/) 搜索 API（新闻搜索） | 推荐 |
+| `ANSPIRE_API_KEYS` | [Anspire AI Search](https://aisearch.anspire.cn/) 针对中文内容特别优化 (可有效增强A股分析效果) | 可选 |
 | `MINIMAX_API_KEYS` | [MiniMax](https://platform.minimaxi.com/) Coding Plan Web Search（结构化搜索结果） | 可选 |
 | `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis) 全渠道搜索 | 可选 |
 | `BOCHA_API_KEYS` | [博查搜索](https://open.bocha.cn/) Web Search API（中文搜索优化，支持AI摘要，多个key用逗号分隔） | 可选 |
@@ -208,7 +209,7 @@
 | `AGENT_MODE` | 开启 Agent 策略问股模式（内部统一命名为 skill，`true`/`false`，默认 false） | 可选 |
 | `AGENT_LITELLM_MODEL` | Agent 主模型（可选）；留空继承主模型，无前缀会按 `openai/<model>` 解析 | 可选 |
 | `AGENT_SKILLS` | 激活的策略技能 id（逗号分隔），`all` 启用全部策略技能；留空时使用主默认策略 skill（内置默认是 `bull_trend`），详见 `.env.example` | 可选 |
-| `AGENT_MAX_STEPS` | Agent 最大推理步数（默认 10） | 可选 |
+| `AGENT_MAX_STEPS` | Agent 最大推理步数上限（默认 10）；多 Agent orchestrator 模式下按 `min(子 Agent 默认值, AGENT_MAX_STEPS)` 生效，不会抬高低默认值 Agent 的步数 | 可选 |
 | `AGENT_SKILL_DIR` | 自定义策略技能目录（默认沿用内置 `strategies/` 兼容路径） | 可选 |
 | `TRADING_DAY_CHECK_ENABLED` | 交易日检查（默认 `true`）：非交易日跳过执行；设为 `false` 或使用 `--force-run` 强制执行 | 可选 |
 | `ENABLE_CHIP_DISTRIBUTION` | 启用筹码分布（Actions 默认 false；需筹码数据时在 Variables 中设为 true，接口可能不稳定） | 可选 |
